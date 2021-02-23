@@ -1,39 +1,43 @@
-# Building Node with Ninja
+# Building Node.js with Ninja
 
-The purpose of this guide is to show how to build Node.js using [Ninja][], as doing so can be significantly quicker than using `make`. Please see [Ninja's site][Ninja] for installation instructions (unix only).
+The purpose of this guide is to show how to build Node.js using [Ninja][], as
+doing so can be significantly quicker than using `make`. Please see
+[Ninja's site][Ninja] for installation instructions (Unix only).
 
-To build Node with ninja, there are 4 steps that must be taken:
+[Ninja][] is supported in the Makefile. Run `./configure --ninja` to configure
+the project to run the regular `make` commands with Ninja.
 
-1. Configure the project's OS-based build rules via `./configure` as usual.
-2. Use `tools/gyp_node.py -f ninja` to produce Ninja-buildable `gyp` output.
-3. Run `ninja -C out/Release` to produce a compiled release binary.
-4. Lastly, make symlink to `./node` using `ln -fs out/Release/node node`.
+For example, `make` will execute `ninja -C out/Release` internally
+to produce a compiled release binary, It will also execute
+`ln -fs out/Release/node node`, so that you can execute `./node` at
+the project's root.
 
-When running `ninja -C out/Release` you will see output similar to the following if the build has succeeded:
-```
+When running `make`, you will see output similar to the following
+if the build has succeeded:
+
+```console
 ninja: Entering directory `out/Release`
 [4/4] LINK node, POSTBUILDS
 ```
 
-The bottom line will change while building, showing the progress as `[finished/total]` build steps.
-This is useful output that `make` does not produce and is one of the benefits of using Ninja.
-Also, Ninja will likely compile much faster than even `make -j8` (or `-j<number of processor threads on your machine>`).
+The bottom line will change while building, showing the progress as
+`[finished/total]` build steps. This is useful output that `make` does not
+produce and is one of the benefits of using Ninja. Also, Ninja will likely
+compile much faster than even `make -j4` (or
+`-j<number of processor threads on your machine>`). You can still pass the
+number of processes to run for [Ninja][] using the environment variable `JOBS`.
+This will be the equivalent to the `-j` parameter in the regular `make`:
 
-## Considerations
-
-Ninja builds vary slightly from `make` builds. If you wish to run `make test` after, `make` will likely still need to rebuild some amount of Node.
-
-As such, if you wish to run the tests, it can be helpful to invoke the test runner directly, like so:
-`tools/test.py --mode=release message parallel sequential -J`
-
-## Alias
-
-`alias nnode='./configure && tools/gyp_node.py -f ninja && ninja -C out/Release && ln -fs out/Release/node node'`
+```bash
+JOBS=12 make
+```
 
 ## Producing a debug build
 
-The above alias can be modified slightly to produce a debug build, rather than a release build as shown below:
-`alias nnodedebug='./configure && tools/gyp_node.py -f ninja && ninja -C out/Debug && ln -fs out/Debug/node node_g'`
+To create a debug build rather than a release build:
 
+```bash
+./configure --ninja --debug && make
+```
 
-[Ninja]: https://martine.github.io/ninja/
+[Ninja]: https://ninja-build.org/

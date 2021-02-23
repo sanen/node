@@ -1,60 +1,39 @@
-module.exports = update
+const path = require('path')
 
-update.usage = 'npm update [-g] [<pkg>...]'
+const Arborist = require('@npmcli/arborist')
+const log = require('npmlog')
 
-var url = require('url')
-var log = require('npmlog')
-var chain = require('slide').chain
-var npm = require('./npm.js')
-var Installer = require('./install.js').Installer
+const npm = require('./npm.js')
+const usageUtil = require('./utils/usage.js')
+const reifyFinish = require('./utils/reify-finish.js')
+const completion = require('./utils/completion/installed-deep.js')
 
-update.completion = npm.commands.outdated.completion
+const usage = usageUtil(
+  'update',
+  'npm update [-g] [<pkg>...]'
+)
 
-function update (args, cb) {
-  var dryrun = false
-  if (npm.config.get('dry-run')) dryrun = true
+const cmd = (args, cb) => update(args).then(() => cb()).catch(cb)
 
-  npm.commands.outdated(args, true, function (er, rawOutdated) {
-    if (er) return cb(er)
-    var outdated = rawOutdated.map(function (ww) {
-      return {
-        dep: ww[0],
-        depname: ww[1],
-        current: ww[2],
-        wanted: ww[3],
-        latest: ww[4],
-        req: ww[5],
-        what: ww[1] + '@' + ww[3]
-      }
-    })
+const update = async args => {
+  const update = args.length === 0 ? true : args
+  const global = path.resolve(npm.globalDir, '..')
+  const where = npm.flatOptions.global
+    ? global
+    : npm.prefix
 
-    var wanted = outdated.filter(function (ww) {
-      if (ww.current === ww.wanted && ww.wanted !== ww.latest) {
-        log.verbose(
-          'outdated',
-          'not updating', ww.depname,
-          "because it's currently at the maximum version that matches its specified semver range"
-        )
-      }
-      return ww.current !== ww.wanted
-    })
-    if (wanted.length === 0) return cb()
+  if (npm.flatOptions.depth) {
+    log.warn('update', 'The --depth option no longer has any effect. See RFC0019.\n' +
+      'https://github.com/npm/rfcs/blob/latest/implemented/0019-remove-update-depth-option.md')
+  }
 
-    log.info('outdated', 'updating', wanted)
-    var toInstall = {}
-    wanted.forEach(function (ww) {
-      // use the initial installation method (repo, tar, git) for updating
-      if (url.parse(ww.req).protocol) ww.what = ww.req
-
-      var where = ww.dep.parent && ww.dep.parent.path || ww.dep.path
-      if (toInstall[where]) {
-        toInstall[where].push(ww.what)
-      } else {
-        toInstall[where] = [ww.what]
-      }
-    })
-    chain(Object.keys(toInstall).map(function (where) {
-      return [new Installer(where, dryrun, toInstall[where]), 'run']
-    }), cb)
+  const arb = new Arborist({
+    ...npm.flatOptions,
+    path: where,
   })
+
+  await arb.reify({ update })
+  await reifyFinish(arb)
 }
+
+module.exports = Object.assign(cmd, { usage, completion })

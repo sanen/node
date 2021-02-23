@@ -1,24 +1,38 @@
-### Pull Request check-list
+<!--
+Before submitting a pull request, please read
+https://github.com/nodejs/node/blob/master/CONTRIBUTING.md.
 
-_Please make sure to review and check all of these items:_
+Commit message formatting guidelines:
+https://github.com/nodejs/node/blob/master/doc/guides/contributing/pull-requests.md#commit-message-guidelines
 
-- [ ] Does `make -j8 test` (UNIX) or `vcbuild test nosign` (Windows) pass with
-  this change (including linting)?
-- [ ] Is the commit message formatted according to [CONTRIBUTING.md][0]?
-- [ ] If this change fixes a bug (or a performance problem), is a regression
-  test (or a benchmark) included?
-- [ ] Is a documentation update included (if this change modifies
-  existing APIs, or introduces new ones)?
+For code changes:
+1. Include tests for any bug fixes or new features.
+2. Update documentation if relevant.
+3. Ensure that `make -j4 test` (UNIX), or `vcbuild test` (Windows) passes.
 
-_NOTE: these things are not required to open a PR and can be done
-afterwards / while the PR is open._
+Developer's Certificate of Origin 1.1
 
-### Affected core subsystem(s)
+By making a contribution to this project, I certify that:
 
-_Please provide affected core subsystem(s) (like buffer, cluster, crypto, etc)_
+(a) The contribution was created in whole or in part by me and I
+    have the right to submit it under the open source license
+    indicated in the file; or
 
-[0]: https://github.com/nodejs/node/blob/master/CONTRIBUTING.md#step-3-commit
+(b) The contribution is based upon previous work that, to the best
+    of my knowledge, is covered under an appropriate open source
+    license and I have the right under that license to submit that
+    work with modifications, whether created in whole or in part
+    by me, under the same open source license (unless I am
+    permitted to submit under a different license), as indicated
+    in the file; or
 
-### Description of change
+(c) The contribution was provided directly to me by some other
+    person who certified (a), (b) or (c) and I have not modified
+    it.
 
-_Please provide a description of the change here._
+(d) I understand and agree that this project and the contribution
+    are public and that a record of the contribution (including all
+    personal information I submit with it, including my sign-off) is
+    maintained indefinitely and may be redistributed consistent with
+    this project or the open source license(s) involved.
+-->

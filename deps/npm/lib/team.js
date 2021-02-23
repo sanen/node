@@ -1,54 +1,146 @@
-var mapToRegistry = require('./utils/map-to-registry.js')
-var npm = require('./npm')
+const columns = require('cli-columns')
+const libteam = require('libnpmteam')
 
-module.exports = team
+const npm = require('./npm.js')
+const output = require('./utils/output.js')
+const otplease = require('./utils/otplease.js')
+const usageUtil = require('./utils/usage')
 
-team.subcommands = ['create', 'destroy', 'add', 'rm', 'ls', 'edit']
+const subcommands = ['create', 'destroy', 'add', 'rm', 'ls']
 
-team.usage =
-  'npm team create <scope:team>\n' +
-  'npm team destroy <scope:team>\n' +
-  'npm team add <scope:team> <user>\n' +
-  'npm team rm <scope:team> <user>\n' +
-  'npm team ls <scope>|<scope:team>\n' +
-  'npm team edit <scope:team>'
+const usage = usageUtil(
+  'team',
+  'npm team create <scope:team> [--otp <otpcode>]\n' +
+  'npm team destroy <scope:team> [--otp <otpcode>]\n' +
+  'npm team add <scope:team> <user> [--otp <otpcode>]\n' +
+  'npm team rm <scope:team> <user> [--otp <otpcode>]\n' +
+  'npm team ls <scope>|<scope:team>\n'
+)
 
-team.completion = function (opts, cb) {
-  var argv = opts.conf.argv.remain
-  if (argv.length === 2) {
-    return cb(null, team.subcommands)
-  }
+const completion = (opts, cb) => {
+  const { conf: { argv: { remain: argv } } } = opts
+  if (argv.length === 2)
+    return cb(null, subcommands)
+
   switch (argv[2]) {
     case 'ls':
     case 'create':
     case 'destroy':
     case 'add':
     case 'rm':
-    case 'edit':
       return cb(null, [])
     default:
       return cb(new Error(argv[2] + ' not recognized'))
   }
 }
 
-function team (args, cb) {
+const cmd = (args, cb) => team(args).then(() => cb()).catch(cb)
+
+const team = async ([cmd, entity = '', user = '']) => {
   // Entities are in the format <scope>:<team>
-  var cmd = args.shift()
-  var entity = (args.shift() || '').split(':')
-  return mapToRegistry('/', npm.config, function (err, uri, auth) {
-    if (err) { return cb(err) }
-    try {
-      return npm.registry.team(cmd, uri, {
-        auth: auth,
-        scope: entity[0],
-        team: entity[1],
-        user: args.shift()
-      }, function (err, data) {
-        !err && data && console.log(JSON.stringify(data, undefined, 2))
-        cb(err, data)
-      })
-    } catch (e) {
-      cb(e.message + '\n\nUsage:\n' + team.usage)
+  // XXX: "description" option to libnpmteam is used as a description of the
+  // team, but in npm's options, this is a boolean meaning "show the
+  // description in npm search output".  Hence its being set to null here.
+  await otplease(npm.flatOptions, opts => {
+    entity = entity.replace(/^@/, '')
+    switch (cmd) {
+      case 'create': return teamCreate(entity, opts)
+      case 'destroy': return teamDestroy(entity, opts)
+      case 'add': return teamAdd(entity, user, opts)
+      case 'rm': return teamRm(entity, user, opts)
+      case 'ls': {
+        const match = entity.match(/[^:]+:.+/)
+        if (match)
+          return teamListUsers(entity, opts)
+        else
+          return teamListTeams(entity, opts)
+      }
+      default:
+        throw usage
     }
   })
 }
+
+const teamCreate = async (entity, opts) => {
+  await libteam.create(entity, opts)
+  if (opts.json) {
+    output(JSON.stringify({
+      created: true,
+      team: entity,
+    }))
+  } else if (opts.parseable)
+    output(`${entity}\tcreated`)
+  else if (!opts.silent && opts.loglevel !== 'silent')
+    output(`+@${entity}`)
+}
+
+const teamDestroy = async (entity, opts) => {
+  await libteam.destroy(entity, opts)
+  if (opts.json) {
+    output(JSON.stringify({
+      deleted: true,
+      team: entity,
+    }))
+  } else if (opts.parseable)
+    output(`${entity}\tdeleted`)
+  else if (!opts.silent && opts.loglevel !== 'silent')
+    output(`-@${entity}`)
+}
+
+const teamAdd = async (entity, user, opts) => {
+  await libteam.add(user, entity, opts)
+  if (opts.json) {
+    output(JSON.stringify({
+      added: true,
+      team: entity,
+      user,
+    }))
+  } else if (opts.parseable)
+    output(`${user}\t${entity}\tadded`)
+  else if (!opts.silent && opts.loglevel !== 'silent')
+    output(`${user} added to @${entity}`)
+}
+
+const teamRm = async (entity, user, opts) => {
+  await libteam.rm(user, entity, opts)
+  if (opts.json) {
+    output(JSON.stringify({
+      removed: true,
+      team: entity,
+      user,
+    }))
+  } else if (opts.parseable)
+    output(`${user}\t${entity}\tremoved`)
+  else if (!opts.silent && opts.loglevel !== 'silent')
+    output(`${user} removed from @${entity}`)
+}
+
+const teamListUsers = async (entity, opts) => {
+  const users = (await libteam.lsUsers(entity, opts)).sort()
+  if (opts.json)
+    output(JSON.stringify(users, null, 2))
+  else if (opts.parseable)
+    output(users.join('\n'))
+  else if (!opts.silent && opts.loglevel !== 'silent') {
+    const plural = users.length === 1 ? '' : 's'
+    const more = users.length === 0 ? '' : ':\n'
+    output(`\n@${entity} has ${users.length} user${plural}${more}`)
+    output(columns(users, { padding: 1 }))
+  }
+}
+
+const teamListTeams = async (entity, opts) => {
+  const teams = (await libteam.lsTeams(entity, opts)).sort()
+  if (opts.json)
+    output(JSON.stringify(teams, null, 2))
+  else if (opts.parseable)
+    output(teams.join('\n'))
+  else if (!opts.silent && opts.loglevel !== 'silent') {
+    const plural = teams.length === 1 ? '' : 's'
+    const more = teams.length === 0 ? '' : ':\n'
+    output(`\n@${entity} has ${teams.length} team${plural}${more}`)
+    output(columns(teams.map(t => `@${t}`), { padding: 1 }))
+  }
+}
+
+module.exports = Object.assign(cmd, { completion, usage })

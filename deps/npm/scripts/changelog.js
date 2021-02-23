@@ -5,84 +5,102 @@ Usage:
 node scripts/changelog.js [comittish]
 
 Generates changelog entries in our format as best as its able based on
-commits starting at comittish, or if that's not passed, master.
+commits starting at comittish, or if that's not passed, latest.
 
 Ordinarily this is run via the gen-changelog shell script, which appends
 the result to the changelog.
 
 */
 const execSync = require('child_process').execSync
-const branch = process.argv[2] || 'master'
-const log = execSync(`git log --pretty='format:%h %H%d %s (%aN)%n%b%n---%n' ${branch}...`).toString().split(/\n/)
-const authormap = {
-  'Rebecca Turner': 'iarna',
-  'Forrest L Norvell': 'othiym23',
-  'Kyle Mitchell': 'kemitchell',
-  'Chris Rebert': 'cvrebert',
-  'Kat Marchán': 'zkat'
-}
+const branch = process.argv[2] || 'origin/latest'
+const log = execSync(`git log --reverse --pretty='format:%h %H%d %s (%aN)%n%b%n---%n' ${branch}...`).toString().split(/\n/)
 
 main()
 
-function print_commit (c) {
-  let m
-  console.log(`* [\`${c.shortid}\`](https://github.com/npm/npm/commit/${c.fullid})`)
-  if (c.fixes) {
-    console.log(`  [#${c.fixes}](https://github.com/npm/npm/issues/${c.fixes})`)
-  } else if (c.prurl && (m = c.prurl.match(/https:\/\/github.com\/([^/]+\/[^/]+)\/pull\/(\d+)/))) {
-    let repo = m[1]
-    let prid = m[2]
-    if (repo !== 'npm/npm') {
-      console.log(`  [${repo}#${prid}](${c.prurl})`)
-    } else {
-      console.log(`  [#${prid}](${c.prurl})`)
+function shortname (url) {
+  let matched = url.match(/https:\/\/github\.com\/([^/]+\/[^/]+)\/(?:pull|issues)\/(\d+)/) ||
+                url.match(/https:\/\/(npm\.community)\/t\/(?:[^/]+\/)(\d+)/)
+  if (!matched) return false
+  let repo = matched[1]
+  let id = matched[2]
+  if (repo !== 'npm/cli') {
+    return `${repo}#${id}`
+  } else {
+    return `#${id}`
+  }
+}
+
+function printCommit (c) {
+  console.log(`* [\`${c.shortid}\`](https://github.com/npm/cli/commit/${c.fullid})`)
+  if (c.fixes.length) {
+    for (const fix of c.fixes) {
+      let label = shortname(fix)
+      if (label) {
+        console.log(`  [${label}](${fix})`)
+      }
     }
   } else if (c.prurl) {
-    console.log(`  [#](${c.prurl})`)
+    let label = shortname(c.prurl)
+    if (label) {
+      console.log(`  [${label}](${c.prurl})`)
+    } else {
+      console.log(`  [#](${c.prurl})`)
+    }
   }
   let msg = c.message
     .replace(/^\s+/mg, '')
     .replace(/^[-a-z]+: /, '')
     .replace(/^/mg, '  ')
+    .replace(/^  Reviewed-by: @.*/mg, '')
     .replace(/\n$/, '')
-  // backtickify package@version
-    .replace(/^(\s*[^@\s]+@\d+[.]\d+[.]\d+)(\s*\S)/g, '$1:$2')
-    .replace(/\b([^@\s]+@\d+[.]\d+[.]\d+)\b/g, '`$1`')
-  // linkify commitids
-    .replace(/\b([a-f0-9]{7,8})\b/g, '[`$1`](https://github.com/npm/npm/commit/$1)')
-    .replace(/\b#(\d+)\b/g, '[#$1](https://github.com/npm/npm/issues/$1)')
+    // backtickify package@version
+    .replace(/^(\s*@?[^@\s]+@\d+[.]\d+[.]\d+)\b(\s*\S)/g, '$1:$2')
+    .replace(/((?:\b|@)[^@\s]+@\d+[.]\d+[.]\d+)\b/g, '`$1`')
+    // linkify commitids
+    .replace(/\b([a-f0-9]{7,8})\b/g, '[`$1`](https://github.com/npm/cli/commit/$1)')
   console.log(msg)
-  if (c.credit) {
-    console.log(`  ([@${c.credit}](https://github.com/${c.credit}))`)
-  } else {
-    console.log(`  ([@${c.author}](https://github.com/${c.author}))`)
+  // don't assign credit for dep updates
+  if (!/^  `[^`]+@\d+\.\d+\.\d+[^`]*`:?$/m.test(msg)) {
+    if (c.credit) {
+      c.credit.forEach(function (credit) {
+        console.log(`  ([@${credit}](https://github.com/${credit}))`)
+      })
+    } else {
+      console.log(`  ([@${c.author}](https://github.com/${c.author}))`)
+    }
   }
 }
 
 function main () {
   let commit
   log.forEach(function (line) {
+    line = line.replace(/\r/g, '')
     let m
-    /*eslint no-cond-assign:0*/
+    /* eslint no-cond-assign:0 */
     if (/^---$/.test(line)) {
-      print_commit(commit)
-    } else if (m = line.match(/^([a-f0-9]{7}) ([a-f0-9]+) (?:[(]([^)]+)[)] )?(.*?) [(](.*?)[)]/)) {
+      printCommit(commit)
+    } else if (m = line.match(/^([a-f0-9]{7,10}) ([a-f0-9]+) (?:[(]([^)]+)[)] )?(.*?) [(](.*?)[)]/)) {
       commit = {
         shortid: m[1],
         fullid: m[2],
         branch: m[3],
         message: m[4],
-        author: authormap[m[5]] || m[5],
+        author: m[5],
         prurl: null,
-        fixes: null,
+        fixes: [],
         credit: null
       }
     } else if (m = line.match(/^PR-URL: (.*)/)) {
       commit.prurl = m[1]
     } else if (m = line.match(/^Credit: @(.*)/)) {
-      commit.credit = m[1]
-    } else if (m = line.match(/^Fixes: #(.*)/)) {
-      commit.fixes = m[1]
+      if (!commit.credit) commit.credit = []
+      commit.credit.push(m[1])
+    } else if (m = line.match(/^(?:Fix(?:es)|Closes?): #?([0-9]+)/)) {
+      commit.fixes.push(`https://github.com/npm/cli/issues/${m[1]}`)
+    } else if (m = line.match(/^(?:Fix(?:es)|Closes?): ([^#]+)#([0-9]*)/)) {
+      commit.fixes.push(`https://github.com/${m[1]}/issues/${m[2]}`)
+    } else if (m = line.match(/^(?:Fix(?:es)|Closes?): (https?:\/\/.*)/)) {
+      commit.fixes.push(m[1])
     } else if (m = line.match(/^Reviewed-By: @(.*)/)) {
       commit.reviewed = m[1]
     } else if (/\S/.test(line)) {

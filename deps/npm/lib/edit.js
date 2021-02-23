@@ -1,34 +1,36 @@
 // npm edit <pkg>
 // open the package folder in the $EDITOR
 
-module.exports = edit
-edit.usage = 'npm edit <pkg>[@<version>]'
+const { resolve } = require('path')
+const fs = require('graceful-fs')
+const { spawn } = require('child_process')
+const npm = require('./npm.js')
+const usageUtil = require('./utils/usage.js')
+const splitPackageNames = require('./utils/split-package-names.js')
 
-edit.completion = require('./utils/completion/installed-shallow.js')
-
-var npm = require('./npm.js')
-var path = require('path')
-var fs = require('graceful-fs')
-var editor = require('editor')
+const usage = usageUtil('edit', 'npm edit <pkg>[/<subpkg>...]')
+const completion = require('./utils/completion/installed-shallow.js')
 
 function edit (args, cb) {
-  var p = args[0]
-  if (args.length !== 1 || !p) return cb(edit.usage)
-  var e = npm.config.get('editor')
-  if (!e) {
-    return cb(new Error(
-      "No editor set.  Set the 'editor' config, or $EDITOR environ."
-    ))
-  }
-  p = p.split('/')
-       .join('/node_modules/')
-       .replace(/(\/node_modules)+/, '/node_modules')
-  var f = path.resolve(npm.dir, p)
-  fs.lstat(f, function (er) {
-    if (er) return cb(er)
-    editor(f, { editor: e }, function (er) {
-      if (er) return cb(er)
-      npm.commands.rebuild(args, cb)
+  if (args.length !== 1)
+    return cb(usage)
+
+  const path = splitPackageNames(args[0])
+  const dir = resolve(npm.dir, path)
+
+  fs.lstat(dir, (err) => {
+    if (err)
+      return cb(err)
+
+    const [bin, ...args] = npm.config.get('editor').split(/\s+/)
+    const editor = spawn(bin, [...args, dir], { stdio: 'inherit' })
+    editor.on('exit', (code) => {
+      if (code)
+        return cb(new Error(`editor process exited with code: ${code}`))
+
+      npm.commands.rebuild([dir], cb)
     })
   })
 }
+
+module.exports = Object.assign(edit, { completion, usage })

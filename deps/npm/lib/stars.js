@@ -1,46 +1,36 @@
-module.exports = stars
+const log = require('npmlog')
+const fetch = require('npm-registry-fetch')
 
-stars.usage = 'npm stars [<user>]'
+const npm = require('./npm.js')
+const output = require('./utils/output.js')
+const getIdentity = require('./utils/get-identity.js')
+const usageUtil = require('./utils/usage.js')
+const completion = require('./utils/completion/none.js')
 
-var npm = require('./npm.js')
-var log = require('npmlog')
-var mapToRegistry = require('./utils/map-to-registry.js')
+const usage = usageUtil('stars', 'npm stars [<user>]')
 
-function stars (args, cb) {
-  npm.commands.whoami([], true, function (er, username) {
-    var name = args.length === 1 ? args[0] : username
+const cmd = (args, cb) => stars(args).then(() => cb()).catch(cb)
 
-    if (er) {
-      if (er.code === 'ENEEDAUTH' && !name) {
-        var needAuth = new Error("'npm stars' on your own user account requires auth")
-        needAuth.code = 'ENEEDAUTH'
-        return cb(needAuth)
-      }
+const stars = (args) => {
+  return stars_(args).catch(er => {
+    if (er.code === 'ENEEDAUTH')
+      log.warn('stars', 'auth is required to look up your username')
 
-      if (er.code !== 'ENEEDAUTH') return cb(er)
-    }
+    throw er
+  })
+}
 
-    mapToRegistry('', npm.config, function (er, uri, auth) {
-      if (er) return cb(er)
-
-      var params = {
-        username: name,
-        auth: auth
-      }
-      npm.registry.stars(uri, params, showstars)
-    })
+const stars_ = async ([user = getIdentity(npm.flatOptions)]) => {
+  const { rows } = await fetch.json('/-/_view/starredByUser', {
+    ...npm.flatOptions,
+    query: { key: `"${await user}"` },
   })
 
-  function showstars (er, data) {
-    if (er) return cb(er)
+  if (rows.length === 0)
+    log.warn('stars', 'user has not starred any packages')
 
-    if (data.rows.length === 0) {
-      log.warn('stars', 'user has not starred any packages.')
-    } else {
-      data.rows.forEach(function (a) {
-        console.log(a.value)
-      })
-    }
-    cb()
-  }
+  for (const row of rows)
+    output(row.value)
 }
+
+module.exports = Object.assign(cmd, { usage, completion })

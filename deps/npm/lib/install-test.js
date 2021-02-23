@@ -1,23 +1,19 @@
-'use strict'
-
 // npm install-test
 // Runs `npm install` and then runs `npm test`
 
-module.exports = installTest
-var install = require('./install.js')
-var test = require('./test.js')
+const install = require('./install.js')
+const test = require('./test.js')
+const usageUtil = require('./utils/usage.js')
 
-installTest.usage = '\nnpm install-test [args]' +
-                    '\nSame args as `npm install`' +
-                    '\n\nalias: npm it'
+const usage = usageUtil(
+  'install-test',
+  'npm install-test [args]' +
+  '\nSame args as `npm install`'
+)
 
-installTest.completion = install.completion
+const completion = install.completion
 
-function installTest (args, cb) {
-  install(args, function (er) {
-    if (er) {
-      return cb(er)
-    }
-    test([], cb)
-  })
-}
+const installTest = (args, cb) =>
+  install(args, er => er ? cb(er) : test([], cb))
+
+module.exports = Object.assign(installTest, { usage, completion })

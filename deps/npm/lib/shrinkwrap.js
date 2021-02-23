@@ -1,130 +1,51 @@
-// emit JSON describing versions of all packages currently installed (for later
-// use with shrinkwrap install)
+const { resolve, basename } = require('path')
+const { promises: { unlink } } = require('fs')
+const Arborist = require('@npmcli/arborist')
+const log = require('npmlog')
 
-module.exports = exports = shrinkwrap
+const npm = require('./npm.js')
+const completion = require('./utils/completion/none.js')
+const usageUtil = require('./utils/usage.js')
+const usage = usageUtil('shrinkwrap', 'npm shrinkwrap')
 
-var path = require('path')
-var log = require('npmlog')
-var writeFileAtomic = require('write-file-atomic')
-var iferr = require('iferr')
-var readPackageTree = require('read-package-tree')
-var validate = require('aproba')
-var npm = require('./npm.js')
-var recalculateMetadata = require('./install/deps.js').recalculateMetadata
-var validatePeerDeps = require('./install/deps.js').validatePeerDeps
-var isExtraneous = require('./install/is-extraneous.js')
-var isOnlyDev = require('./install/is-dev.js').isOnlyDev
-var packageId = require('./utils/package-id.js')
-var moduleName = require('./utils/module-name.js')
+const cmd = (args, cb) => shrinkwrap().then(() => cb()).catch(cb)
 
-shrinkwrap.usage = 'npm shrinkwrap'
-
-function shrinkwrap (args, silent, cb) {
-  if (typeof cb !== 'function') {
-    cb = silent
-    silent = false
+const shrinkwrap = async () => {
+  // if has a npm-shrinkwrap.json, nothing to do
+  // if has a package-lock.json, rename to npm-shrinkwrap.json
+  // if has neither, load the actual tree and save that as npm-shrinkwrap.json
+  // in all cases, re-cast to current lockfile version
+  //
+  // loadVirtual, fall back to loadActual
+  // rename shrinkwrap file type, and tree.meta.save()
+  if (npm.flatOptions.global) {
+    const er = new Error('`npm shrinkwrap` does not work for global packages')
+    er.code = 'ESHRINKWRAPGLOBAL'
+    throw er
   }
 
-  if (args.length) {
-    log.warn('shrinkwrap', "doesn't take positional args")
-  }
+  const path = npm.prefix
+  const sw = resolve(path, 'npm-shrinkwrap.json')
+  const arb = new Arborist({ ...npm.flatOptions, path })
+  const tree = await arb.loadVirtual().catch(() => arb.loadActual())
+  const { meta } = tree
+  const newFile = meta.hiddenLockfile || !meta.loadedFromDisk
+  const oldFilename = meta.filename
+  const notSW = !newFile && basename(oldFilename) !== 'npm-shrinkwrap.json'
 
-  var dir = path.resolve(npm.dir, '..')
-  npm.config.set('production', true)
-  readPackageTree(dir, andRecalculateMetadata(iferr(cb, function (tree) {
-    var pkginfo = treeToShrinkwrap(tree, !!npm.config.get('dev') || /^dev(elopment)?$/.test(npm.config.get('also')))
-    shrinkwrap_(pkginfo, silent, cb)
-  })))
+  meta.hiddenLockfile = false
+  meta.filename = sw
+  await meta.save()
+
+  if (newFile)
+    log.notice('', 'created a lockfile as npm-shrinkwrap.json')
+  else if (notSW) {
+    await unlink(oldFilename)
+    log.notice('', 'package-lock.json has been renamed to npm-shrinkwrap.json')
+  } else if (meta.originalLockfileVersion !== npm.lockfileVersion)
+    log.notice('', `npm-shrinkwrap.json updated to version ${npm.lockfileVersion}`)
+  else
+    log.notice('', 'npm-shrinkwrap.json up to date')
 }
 
-function andRecalculateMetadata (next) {
-  validate('F', arguments)
-  return function (er, tree) {
-    validate('EO', arguments)
-    if (er) return next(er)
-    recalculateMetadata(tree, log, next)
-  }
-}
-
-function treeToShrinkwrap (tree, dev) {
-  validate('OB', arguments)
-  var pkginfo = {}
-  if (tree.package.name) pkginfo.name = tree.package.name
-  if (tree.package.version) pkginfo.version = tree.package.version
-  var problems = []
-  if (tree.children.length) {
-    shrinkwrapDeps(dev, problems, pkginfo.dependencies = {}, tree)
-  }
-  if (problems.length) pkginfo.problems = problems
-  return pkginfo
-}
-
-function shrinkwrapDeps (dev, problems, deps, tree, seen) {
-  validate('BAOO', [dev, problems, deps, tree])
-  if (!seen) seen = {}
-  if (seen[tree.path]) return
-  seen[tree.path] = true
-  Object.keys(tree.missingDeps).forEach(function (name) {
-    var invalid = tree.children.filter(function (dep) { return moduleName(dep) === name })[0]
-    if (invalid) {
-      problems.push('invalid: have ' + invalid.package._id + ' (expected: ' + tree.missingDeps[name] + ') ' + invalid.path)
-    } else if (!tree.package.optionalDependencies || !tree.package.optionalDependencies[name]) {
-      var topname = packageId(tree)
-      problems.push('missing: ' + name + '@' + tree.package.dependencies[name] +
-        (topname ? ', required by ' + topname : ''))
-    }
-  })
-  tree.children.sort(function (aa, bb) { return moduleName(aa).localeCompare(moduleName(bb)) }).forEach(function (child) {
-    if (!dev && isOnlyDev(child)) {
-      log.warn('shrinkwrap', 'Excluding devDependency: %s', packageId(child), child.parent.package.dependencies)
-      return
-    }
-    var pkginfo = deps[moduleName(child)] = {}
-    pkginfo.version = child.package.version
-    pkginfo.from = child.package._from
-    pkginfo.resolved = child.package._resolved
-    if (isExtraneous(child)) {
-      problems.push('extraneous: ' + child.package._id + ' ' + child.path)
-    }
-    validatePeerDeps(child, function (tree, pkgname, version) {
-      problems.push('peer invalid: ' + pkgname + '@' + version +
-        ', required by ' + child.package._id)
-    })
-    if (child.children.length) {
-      shrinkwrapDeps(dev, problems, pkginfo.dependencies = {}, child, seen)
-    }
-  })
-}
-
-function shrinkwrap_ (pkginfo, silent, cb) {
-  if (pkginfo.problems) {
-    return cb(new Error('Problems were encountered\n' +
-                        'Please correct and try again.\n' +
-                        pkginfo.problems.join('\n')))
-  }
-
-  save(pkginfo, silent, cb)
-}
-
-function save (pkginfo, silent, cb) {
-  // copy the keys over in a well defined order
-  // because javascript objects serialize arbitrarily
-  var swdata
-  try {
-    swdata = JSON.stringify(pkginfo, null, 2) + '\n'
-  } catch (er) {
-    log.error('shrinkwrap', 'Error converting package info to json')
-    return cb(er)
-  }
-
-  var file = path.resolve(npm.prefix, 'npm-shrinkwrap.json')
-
-  writeFileAtomic(file, swdata, function (er) {
-    if (er) return cb(er)
-    if (silent) return cb(null, pkginfo)
-    log.clearProgress()
-    console.log('wrote npm-shrinkwrap.json')
-    log.showProgress()
-    cb(null, pkginfo)
-  })
-}
+module.exports = Object.assign(cmd, { usage, completion })

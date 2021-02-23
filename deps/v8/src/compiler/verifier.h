@@ -6,6 +6,7 @@
 #define V8_COMPILER_VERIFIER_H_
 
 #include "src/base/macros.h"
+#include "src/common/globals.h"
 
 namespace v8 {
 namespace internal {
@@ -21,8 +22,15 @@ class Schedule;
 class Verifier {
  public:
   enum Typing { TYPED, UNTYPED };
+  enum CheckInputs { kValuesOnly, kAll };
+  enum CodeType { kDefault, kWasm };
 
-  static void Run(Graph* graph, Typing typing = TYPED);
+  Verifier(const Verifier&) = delete;
+  Verifier& operator=(const Verifier&) = delete;
+
+  static void Run(Graph* graph, Typing typing = TYPED,
+                  CheckInputs check_inputs = kAll,
+                  CodeType code_type = kDefault);
 
 #ifdef DEBUG
   // Verifies consistency of node inputs and uses:
@@ -48,11 +56,10 @@ class Verifier {
 
  private:
   class Visitor;
-  DISALLOW_COPY_AND_ASSIGN(Verifier);
 };
 
 // Verifies properties of a schedule, such as dominance, phi placement, etc.
-class ScheduleVerifier {
+class V8_EXPORT_PRIVATE ScheduleVerifier {
  public:
   static void Run(Schedule* schedule);
 };
